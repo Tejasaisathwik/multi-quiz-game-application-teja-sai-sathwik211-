@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+      import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+      import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, query, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+      // --- Global Firebase and App State variables ---
+      const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+      const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+      const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+      let app, auth, db;
+      let userId = null;
+      let authReady = false;
+
+      // Quiz State
+      let currentPage = 'home';
+      let selectedCategory = null;
+      let currentLevel = 0;
+      let currentQuestionIndex = 0;
+      let score = 0;
+      let leaderboard = [];
+
+      // Calculator State
+      let showCalculator = false;
+      let calculatorInput = '0';
+      let calculatorOperator = null;
+      let calculatorFirstOperand = null;
+      let isNewInput = true;
+
+      // --- Quiz Data ---
+      const quizData = {
+        'Python Language': [
+          {
+            level: 1,
+            questions: [
+              {
+                question: 'What is the correct way to write a `for` loop that prints numbers from 0 to 4?',
+                options: ['for i in range(5):', 'for i in range(4):', 'for i from 0 to 4:', 'for i in 0..4:'],
+                answer: 'for i in range(5):'
+              },
+              {
+                question: 'Which statement is used to exit a loop?',
+                options: ['exit', 'break', 'stop', 'quit'],
+                answer: 'break'
+              },
+              {
+                question: 'What is the output of `print(10 > 5 and 5 < 10)`?',
+                options: ['True', 'False', 'Error', '1'],
+                answer: 'True'
+              },
+              {
+                question: 'Which operator is used for exponentiation?',
+                options: ['^', '**', '%', 'x'],
+                answer: '**'
+              },
+              {
+                question: 'What is a block of code in Python?',
+                options: ['A function', 'An indented section', 'A class', 'A loop'],
+                answer: 'An indented section'
+              }
+            ]
+          },
+          {
+            level: 2,
+            questions: [
+              {
+                question: 'What is the correct syntax for a `while` loop that runs forever?',
+                options: ['while (true):', 'while True:', 'loop:', 'while 1:'],
+                answer: 'while True:'
+              },
+              {
+                question: 'How do you check if a number is even?',
+                options: ['number % 2 == 0', 'number / 2 == 0', 'is_even(number)', 'number % 2'],
+                answer: 'number % 2 == 0'
+              },
+              {
+                question: 'What does the `continue` statement do?',
+                options: ['Exits the loop', 'Skips to the next iteration of the loop', 'Restarts the program', 'Pauses the program'],
+                answer: 'Skips to the next iteration of the loop'
+              },
+              {
+                question: 'Which of these is a valid `if` statement?',
+                options: ['if x is 5', 'if x = 5:', 'if x == 5:', 'if (x==5)'],
+                answer: 'if x == 5:'
+              },
+              {
+                question: 'What does `elif` stand for?',
+                options: ['else if', 'else finally', 'else for', 'element if'],
+                answer: 'else if'
+              }
+            ]
+          },
+          {
+            level: 3,
+            questions: [
+              {
+                question: 'Which built-in function is used to get the length of a string or list?',
+                options: ['size()', 'length()', 'count()', 'len()'],
+                answer: 'len()'
+              },
+              {
+                question: 'How do you create an empty list?',
+                options: ['list[]', 'new list()', '{}', '[]'],
+                answer: '[]'
+              },
+              {
+                question: 'What is the output of `print("hello"[1])`?',
+                options: ['h', 'e', 'l', 'hello'],
+                answer: 'e'
+              },
+              {
+                question: 'How do you call a function named `my_function`?',
+                options: ['my_function', 'call my_function()', 'my_function()', 'run my_function'],
+                answer: 'my_function()'
+              },
+              {
+                question: 'What is a boolean data type?',
+                options: ['Text', 'A number with a decimal', 'True or False', 'An integer'],
+                answer: 'True or False'
+              }
+            ]
+          },
+          {
+            level: 4,
+            questions: [
+              {
+                question: 'Which keyword is used to define a function?',
+                options: ['function', 'def', 'func', 'define'],
+                answer: 'def'
+              },
+              {
+                question: 'What does the `range(1, 5)` function return?',
+                options: ['1, 2, 3, 4, 5', '1, 2, 3, 4', '0, 1, 2, 3, 4', '2, 3, 4, 5'],
+                answer: '1, 2, 3, 4'
+              },
+              {
+                question: 'What is the correct way to add an element to a list?',
+                options: ['list.add(item)', 'list.append(item)', 'list += item', 'list.push(item)'],
+                answer: 'list.append(item)'
+              },
+              {
+                question: 'What is the result of `10 // 3`?',
+                options: ['3.33', '3', '1', 'Error'],
+                answer: '3'
+              },
+              {
+                question: 'Which of these is a comment in Python?',
+                options: ['// This is a comment', '-- This is a comment', '# This is a comment', '/* This is a comment */'],
+                answer: '# This is a comment'
+              }
+            ]
+          },
+          {
+            level: 5,
+            questions: [
+              {
+                question: 'How do you get a list of all keys in a dictionary?',
+                options: ['dict.values()', 'dict.items()', 'dict.keys()', 'dict.get_keys()'],
+                answer: 'dict.keys()'
+              },
+              {
+                question: 'What is the output of `print(type([1, 2, 3]))`?',
+                options: ['<class \'list\'>', '<class \'tuple\'>', '<class \'array\'>', '<class \'dict\'>'],
+                answer: '<class \'list\'>'
+              },
+              {
+                question: 'What is the purpose of the `pass` statement?',
+                options: ['To skip a loop', 'To do nothing and act as a placeholder', 'To define a function', 'To end a function'],
+                answer: 'To do nothing and act as a placeholder'
+              },
+              {
+                question: 'How can you unpack a tuple into variables?',
+                options: ['a, b = (1, 2)', 'a.b = (1, 2)', 'a, b <- [1, 2]', 'unpack(1, 2) to a, b'],
+                answer: 'a, b = (1, 2)'
+              },
+              {
+                question: 'What is the purpose of a `docstring`?',
+                options: ['To create a comment', 'To define a variable', 'To document functions and modules', 'To print output'],
+                answer: 'To document functions and modules'
+              }
+            ]
+          }
+        ],
+        'General Knowledge': [
+          {
+            level: 1,
+            questions: [
+              {
+                question: 'What is the capital of France?',
+                options: ['London', 'Berlin', 'Madrid', 'Paris'],
+                answer: 'Paris'
+              },
+              {
+                question: 'Who painted the Mona Lisa?',
+                options: ['Pablo Picasso', 'Leonardo da Vinci', 'Vincent van Gogh', 'Michelangelo'],
+                answer: 'Leonardo da Vinci'
+              },
+              {
+                question: 'What is the largest planet in our solar system?',
+                options: ['Earth', 'Mars', 'Jupiter', 'Saturn'],
+                answer: 'Jupiter'
+              },
+              {
+                question: 'How many continents are there?',
+                options: ['5', '6', '7', '8'],
+                answer: '7'
+              },
+              {
+                question: 'What is the chemical symbol for water?',
+                options: ['H2O', 'CO2', 'O2', 'NaCl'],
+                answer: 'H2O'
+              }
+            ]
+          },
+          {
+            level: 2,
+            questions: [
+              {
+                question: 'Which country is known as the Land of the Rising Sun?',
+                options: ['China', 'Japan', 'South Korea', 'Thailand'],
+                answer: 'Japan'
+              },
+              {
+                question: 'What is the longest river in the world?',
+                options: ['Amazon River', 'Nile River', 'Yangtze River', 'Mississippi River'],
+                answer: 'Nile River'
+              },
+              {
+                question: 'Who wrote "Romeo and Juliet"?',
+                options: ['Charles Dickens', 'Jane Austen', 'William Shakespeare', 'Mark Twain'],
+                answer: 'William Shakespeare'
+              },
+              {
+                question: 'What is the main ingredient in guacamole?',
+                options: ['Tomato', 'Onion', 'Avocado', 'Jalapeno'],
+                answer: 'Avocado'
+              },
+              {
+                question: 'What is the smallest country in the world?',
+                options: ['Monaco', 'Nauru', 'Vatican City', 'San Marino'],
+                answer: 'Vatican City'
+              }
+            ]
+          },
+          {
+            level: 3,
+            questions: [
+              {
+                question: 'In which year did the Titanic sink?',
+                options: ['1910', '1912', '1914', '1916'],
+                answer: '1912'
+              },
+              {
+                question: 'What is the hardest natural substance on Earth?',
+                options: ['Iron', 'Gold', 'Diamond', 'Steel'],
+                answer: 'Diamond'
+              },
+              {
+                question: 'Who was the first man to walk on the moon?',
+                options: ['Buzz Aldrin', 'Yuri Gagarin', 'Neil Armstrong', 'Michael Collins'],
+                answer: 'Neil Armstrong'
+              },
+              {
+                question: 'What is the capital of Australia?',
+                options: ['Sydney', 'Melbourne', 'Canberra', 'Perth'],
+                answer: 'Canberra'
+              },
+              {
+                question: 'Which gas do plants absorb from the atmosphere?',
+                options: ['Oxygen', 'Nitrogen', 'Carbon Dioxide', 'Hydrogen'],
+                answer: 'Carbon Dioxide'
+              }
+            ]
+          },
+          {
+            level: 4,
+            questions: [
+              {
+                question: 'Which is the largest ocean on Earth?',
+                options: ['Atlantic Ocean', 'Indian Ocean', 'Arctic Ocean', 'Pacific Ocean'],
+                answer: 'Pacific Ocean'
+              },
+              {
+                question: 'What is the largest organ in the human body?',
+                options: ['Heart', 'Brain', 'Liver', 'Skin'],
+                answer: 'Skin'
+              },
+              {
+                question: 'What is the currency of Japan?',
+                options: ['Yuan', 'Won', 'Yen', 'Baht'],
+                answer: 'Yen'
+              },
+              {
+                question: 'Which planet is known as the "Red Planet"?',
+                options: ['Venus', 'Mars', 'Jupiter', 'Mercury'],
+                answer: 'Mars'
+              },
+              {
+                question: 'What is the boiling point of water?',
+                options: ['90°C', '100°C', '110°C', '120°C'],
+                answer: '100°C'
+              }
+            ]
+          },
+          {
+            level: 5,
+            questions: [
+              {
+                question: 'Who invented the telephone?',
+                options: ['Thomas Edison', 'Nikola Tesla', 'Alexander Graham Bell', 'Albert Einstein'],
+                answer: 'Alexander Graham Bell'
+              },
+              {
+                question: 'How many bones are in the adult human body?',
+                options: ['206', '210', '215', '200'],
+                answer: '206'
+              },
+              {
+                question: 'What is the largest desert in the world?',
+                options: ['Gobi Desert', 'Sahara Desert', 'Kalahari Desert', 'Arabian Desert'],
+                answer: 'Sahara Desert'
+              },
+              {
+                question: 'What is the powerhouse of the cell?',
+                options: ['Nucleus', 'Mitochondria', 'Ribosome', 'Cytoplasm'],
+                answer: 'Mitochondria'
+              },
+              {
+                question: 'What is the speed of light?',
+                options: ['300,000 km/s', '150,000 km/s', '450,000 km/s', '600,000 km/s'],
+                answer: '300,000 km/s'
+              }
+            ]
+          }
+        ],
+        'Math Problems': [
+          {
+            level: 1,
+            questions: [
+              {
+                question: 'What is 7 + 8?',
+                options: ['13', '14', '15', '16'],
+                answer: '15'
+              },
+              {
+                question: 'What is 12 - 5?',
+                options: ['6', '7', '8', '9'],
+                answer: '7'
+              },
+              {
+                question: 'What is 4 * 6?',
+                options: ['20', '22', '24', '26'],
+                answer: '24'
+              },
+              {
+                question: 'What is 18 / 3?',
+                options: ['5', '6', '7', '8'],
+                answer: '6'
+              },
+              {
+                question: 'What is 5 squared?',
+                options: ['10', '20', '25', '50'],
+                answer: '25'
+              }
+            ]
+          },
+          {
+            level: 2,
+            questions: [
+              {
+                question: 'What is 15 + 23?',
+                options: ['35', '38', '40', '42'],
+                answer: '38'
+              },
+              {
+                question: 'What is 50 - 17?',
+                options: ['30', '33', '35', '37'],
+                answer: '33'
+              },
+              {
+                question: 'What is 9 * 8?',
+                options: ['63', '72', '81', '78'],
+                answer: '72'
+              },
+              {
+                question: 'What is 100 / 5?',
+                options: ['10', '15', '20', '25'],
+                answer: '20'
+              },
+              {
+                question: 'What is the square root of 81?',
+                options: ['7', '8', '9', '10'],
+                answer: '9'
+              }
+            ]
+          },
+          {
+            level: 3,
+            questions: [
+              {
+                question: 'What is 15 * 3 + 5?',
+                options: ['50', '45', '20', '30'],
+                answer: '50'
+              },
+              {
+                question: 'What is (10 + 2) * 4?',
+                options: ['48', '40', '16', '36'],
+                answer: '48'
+              },
+              {
+                question: 'What is the area of a rectangle with length 10 and width 7?',
+                options: ['17', '34', '70', '140'],
+                answer: '70'
+              },
+              {
+                question: 'If a pizza has 8 slices, and you eat 3, what fraction is left?',
+                options: ['3/8', '5/8', '1/2', '2/3'],
+                answer: '5/8'
+              },
+              {
+                question: 'What is 5! (5 factorial)?',
+                options: ['15', '25', '120', '100'],
+                answer: '120'
+              }
+            ]
+          },
+          {
+            level: 4,
+            questions: [
+              {
+                question: 'What is 20% of 150?',
+                options: ['15', '20', '30', '35'],
+                answer: '30'
+              },
+              {
+                question: 'What is the next number in the sequence: 1, 4, 9, 16, ...?',
+                options: ['20', '25', '36', '32'],
+                answer: '25'
+              },
+              {
+                question: 'What is the value of pi (π) rounded to two decimal places?',
+                options: ['3.1', '3.14', '3.15', '3.142'],
+                answer: '3.14'
+              },
+              {
+                question: 'If a car travels 60 miles in 2 hours, what is its average speed in mph?',
+                options: ['20', '30', '40', '120'],
+                answer: '30'
+              },
+              {
+                question: 'Solve for x: 2x + 5 = 15',
+                options: ['x=5', 'x=10', 'x=7.5', 'x=2.5'],
+                answer: 'x=5'
+              }
+            ]
+          },
+          {
+            level: 5,
+            questions: [
+              {
+                question: 'What is the area of a circle with a radius of 5?',
+                options: ['$5\pi$', '$10\pi$', '$25\pi$', '$100\pi$'],
+                answer: '$25\pi$'
+              },
+              {
+                question: 'What is the volume of a cube with side length 4?',
+                options: ['16', '32', '64', '128'],
+                answer: '64'
+              },
+              {
+                question: 'What is the probability of rolling a 7 with two standard dice?',
+                options: ['1/6', '1/12', '1/36', '1/3'],
+                answer: '1/6'
+              },
+              {
+                question: 'What is the value of `2^5`?',
+                options: ['10', '16', '32', '64'],
+                answer: '32'
+              },
+              {
+                question: 'Simplify: $\frac{1}{2} + \frac{1}{4}$',
+                options: ['1/6', '2/6', '3/4', '1'],
+                answer: '3/4'
+              }
+            ]
+          }
+        ]
+      };
+
+      document.addEventListener('DOMContentLoaded', () => {
+        // Initialize Firebase
+        if (Object.keys(firebaseConfig).length > 0) {
+          app = initializeApp(firebaseConfig);
+          auth = getAuth(app);
+          db = getFirestore(app);
+
+          onAuthStateChanged(auth, async (user) => {
+            if (user) {
+              userId = user.uid;
+            } else {
+              try {
+                if (initialAuthToken) {
+                  const userCredential = await signInWithCustomToken(auth, initialAuthToken);
+                  userId = userCredential.user.uid;
+                } else {
+                  const userCredential = await signInAnonymously(auth);
+                  userId = userCredential.user.uid;
+                }
+              } catch (error) {
+                console.error("Firebase Auth Error:", error);
+              }
+            }
+            authReady = true;
+            // Start rendering the app after authentication is ready
+            renderPage();
+            setupLeaderboardListener();
+          });
+        } else {
+          // If Firebase config is not available, just render the app without persistence
+          renderPage();
+        }
+
+        // --- Event Listeners for Navigation ---
+        document.getElementById('home-btn').addEventListener('click', () => {
+          currentPage = 'home';
+          renderPage();
+        });
+        document.getElementById('brand-logo').addEventListener('click', () => {
+          currentPage = 'home';
+          renderPage();
+        });
+        document.getElementById('leaderboard-btn').addEventListener('click', () => {
+          currentPage = 'leaderboard';
+          renderPage();
+        });
+        document.getElementById('calculator-btn').addEventListener('click', () => {
+          showCalculator = true;
+          renderPage();
+        });
+
+      });
+
+      // --- Core Rendering Functions ---
+      const renderPage = () => {
+        const mainContent = document.getElementById('main-content');
+        if (!mainContent) return; // Guard clause if main element isn't available yet
+
+        // Clear existing content
+        mainContent.innerHTML = '';
+
+        let content = '';
+        switch(currentPage) {
+          case 'home':
+            content = renderHomePage();
+            break;
+          case 'levelSelection':
+            content = renderLevelSelectionPage();
+            break;
+          case 'quiz':
+            content = renderQuizContent();
+            break;
+          case 'leaderboard':
+            content = renderLeaderboard();
+            break;
+          case 'result':
+            content = renderResultPage();
+            break;
+          default:
+            content = renderHomePage();
+            break;
+        }
+        mainContent.innerHTML = content;
+
+        if (showCalculator) {
+            renderCalculator();
+        }
+
+        // Add event listeners for the rendered content
+        setupPageEventListeners();
+      };
+
+      const setupPageEventListeners = () => {
+        if (currentPage === 'home') {
+          document.querySelectorAll('.category-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+              const category = e.currentTarget.dataset.category;
+              handleCategoryClick(category);
+            });
+          });
+        } else if (currentPage === 'levelSelection') {
+          document.querySelectorAll('.level-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+              const levelIndex = parseInt(e.currentTarget.dataset.levelIndex);
+              handleLevelClick(levelIndex);
+            });
+          });
+        } else if (currentPage === 'quiz') {
+          document.querySelectorAll('.answer-option').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+              const option = e.currentTarget.dataset.option;
+              handleAnswer(option);
+            });
+          });
+        } else if (currentPage === 'result') {
+          document.getElementById('back-to-home-btn').addEventListener('click', () => {
+            currentPage = 'home';
+            renderPage();
+          });
+        }
+      };
+
+      // --- Page Content Generators ---
+      const renderHomePage = () => {
+        const categoryCards = Object.keys(quizData).map((category, index) => `
+          <div data-category="${category}" class="category-card bg-gray-800 p-6 rounded-2xl shadow-lg cursor-pointer
+                      hover:shadow-xl transition-all duration-300 transform hover:-translate-y-2
+                      hover:bg-gray-700">
+            <h3 class="text-xl font-bold">${category}</h3>
+            <p class="mt-2 text-gray-400">5 Levels</p>
+          </div>
+        `).join('');
+
+        return `
+          <div class="p-8 text-center text-white">
+            <h2 class="text-3xl md:text-4xl font-bold mb-8">Choose a Quiz Category</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              ${categoryCards}
+            </div>
+          </div>
+        `;
+      };
+
+      const renderLevelSelectionPage = () => {
+        if (!selectedCategory) return '';
+        const levelCards = quizData[selectedCategory].map((level, index) => `
+          <div data-level-index="${index}" class="level-card bg-gray-800 p-6 rounded-2xl shadow-lg cursor-pointer
+                      hover:shadow-xl transition-all duration-300 transform hover:-translate-y-2
+                      hover:bg-gray-700">
+            <h3 class="text-xl font-bold">Level ${level.level}</h3>
+            <p class="mt-2 text-gray-400">5 Questions</p>
+          </div>
+        `).join('');
+
+        return `
+          <div class="p-8 text-center text-white">
+            <h2 class="text-3xl md:text-4xl font-bold mb-8">Choose a Level for ${selectedCategory}</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              ${levelCards}
+            </div>
+          </div>
+        `;
+      };
+
+      const renderQuizContent = () => {
+        if (!selectedCategory) return '';
+        const levelData = quizData[selectedCategory][currentLevel];
+        const question = levelData.questions[currentQuestionIndex];
+        const optionButtons = question.options.map(option => `
+          <button data-option="${option}" class="answer-option bg-emerald-500 text-white text-lg font-semibold py-4 px-6 rounded-xl shadow-md
+                      hover:bg-emerald-600 transition-colors duration-300 transform hover:scale-105 active:scale-95">
+            ${option}
+          </button>
+        `).join('');
+
+        return `
+          <div class="p-8 text-center text-white">
+            <h2 class="text-2xl md:text-3xl font-bold mb-4">${selectedCategory} - Level ${currentLevel + 1}</h2>
+            <div class="bg-gray-800 p-6 md:p-8 rounded-2xl shadow-lg mb-6">
+              <p class="text-xl md:text-2xl font-semibold mb-6">
+                ${question.question}
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                ${optionButtons}
+              </div>
+            </div>
+            <p class="text-2xl font-bold mt-4">Current Score: <span id="current-score">${score}</span></p>
+          </div>
+        `;
+      };
+
+      const renderLeaderboard = () => {
+        const sortedLeaderboard = [...leaderboard].sort((a, b) => b.score - a.score);
+        const tableRows = sortedLeaderboard.map((player, index) => `
+          <tr class="${player.id === userId ? 'bg-emerald-900 font-bold' : ''} border-b border-gray-700">
+            <td class="p-4 text-lg">${index + 1}</td>
+            <td class="p-4 text-lg font-mono text-ellipsis overflow-hidden whitespace-nowrap">${player.id}</td>
+            <td class="p-4 text-lg text-right">${player.score}</td>
+          </tr>
+        `).join('');
+
+        return `
+          <div class="p-8 text-center text-white">
+            <h2 class="text-3xl md:text-4xl font-bold mb-6">Leaderboard</h2>
+            <p class="text-md mb-4 text-gray-400">Your User ID: ${userId}</p>
+            <div class="bg-gray-800 p-6 md:p-8 rounded-2xl shadow-lg">
+              <table class="w-full text-left">
+                <thead>
+                  <tr class="border-b-2 border-gray-700 text-gray-400 uppercase text-sm">
+                    <th class="p-4">Rank</th>
+                    <th class="p-4">User ID</th>
+                    <th class="p-4 text-right">Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${tableRows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      };
+
+      const renderResultPage = () => {
+        return `
+          <div class="p-8 text-center text-white">
+            <h2 class="text-4xl font-bold mb-4">Level Complete!</h2>
+            <p class="text-2xl mb-6">Your Final Score is: <span class="font-extrabold text-emerald-500">${score}</span></p>
+            <button id="back-to-home-btn" class="bg-emerald-500 text-white font-bold py-3 px-8 rounded-xl shadow-lg
+                       hover:bg-emerald-600 transition-colors duration-300 transform hover:scale-105 active:scale-95">
+              Back to Home
+            </button>
+          </div>
+        `;
+      };
+
+      // --- Calculator Component Functions ---
+      const renderCalculator = () => {
+        const calculatorModal = document.createElement('div');
+        calculatorModal.id = 'calculator-modal';
+        calculatorModal.className = 'fixed inset-0 backdrop-blur-sm flex justify-center items-center z-50';
+        calculatorModal.innerHTML = `
+          <div class="bg-white dark:bg-gray-900 p-6 rounded-2xl shadow-lg w-80">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100">Calculator</h2>
+              <button id="close-calculator" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl font-bold">&times;</button>
+            </div>
+            <div id="calculator-display" class="bg-gray-100 dark:bg-gray-800 text-right p-4 rounded-xl text-4xl mb-4 font-mono text-gray-900 dark:text-gray-100 overflow-x-auto">
+              ${calculatorInput}
+            </div>
+            <div class="grid grid-cols-4 gap-2">
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="7">7</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="8">8</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="9">9</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600" data-value="/">/</button>
+
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="4">4</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="5">5</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="6">6</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600" data-value="*">*</button>
+
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="1">1</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="2">2</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="3">3</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600" data-value="-">-</button>
+
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value="0">0</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600" data-value=".">.</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600" data-value="=">=</button>
+              <button class="calc-btn p-4 rounded-xl text-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600" data-value="+">+</button>
+
+              <button id="clear-calculator" class="col-span-2 p-4 rounded-xl text-xl font-semibold bg-red-500 text-white hover:bg-red-600">C</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(calculatorModal);
+
+        // Add event listeners for calculator buttons
+        document.getElementById('close-calculator').addEventListener('click', () => {
+          showCalculator = false;
+          calculatorModal.remove();
+        });
+        document.getElementById('clear-calculator').addEventListener('click', handleCalculatorClear);
+        document.querySelectorAll('.calc-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => handleCalculatorButton(e.target.dataset.value));
+        });
+      };
+
+      const handleCalculatorButton = (value) => {
+        const display = document.getElementById('calculator-display');
+        if (!display) return;
+
+        if (['+', '-', '*', '/'].includes(value)) {
+          if (calculatorOperator && !isNewInput) {
+            handleCalculatorEquals();
+          }
+          calculatorOperator = value;
+          calculatorFirstOperand = parseFloat(calculatorInput);
+          isNewInput = true;
+        } else if (value === '=') {
+          handleCalculatorEquals();
+        } else if (value === '.') {
+          if (isNewInput) {
+            calculatorInput = '0.';
+            isNewInput = false;
+          } else if (!calculatorInput.includes('.')) {
+            calculatorInput += '.';
+          }
+        } else {
+          if (isNewInput) {
+            calculatorInput = value;
+            isNewInput = false;
+          } else {
+            calculatorInput += value;
+          }
+        }
+        display.textContent = calculatorInput;
+      };
+
+      const handleCalculatorEquals = () => {
+        const display = document.getElementById('calculator-display');
+        if (!display || !calculatorOperator || calculatorFirstOperand === null) return;
+
+        const secondOperand = parseFloat(calculatorInput);
+        let result;
+        switch (calculatorOperator) {
+          case '+': result = calculatorFirstOperand + secondOperand; break;
+          case '-': result = calculatorFirstOperand - secondOperand; break;
+          case '*': result = calculatorFirstOperand * secondOperand; break;
+          case '/': result = calculatorFirstOperand / secondOperand; break;
+          default: return;
+        }
+
+        calculatorInput = String(result);
+        calculatorFirstOperand = result;
+        calculatorOperator = null;
+        isNewInput = true;
+        display.textContent = calculatorInput;
+      };
+
+      const handleCalculatorClear = () => {
+        const display = document.getElementById('calculator-display');
+        if (!display) return;
+        calculatorInput = '0';
+        calculatorFirstOperand = null;
+        calculatorOperator = null;
+        isNewInput = true;
+        display.textContent = calculatorInput;
+      };
+
+      // --- Core Game Logic Functions ---
+      const handleCategoryClick = (category) => {
+        selectedCategory = category;
+        currentPage = 'levelSelection';
+        renderPage();
+      };
+
+      const handleLevelClick = (levelIndex) => {
+        currentLevel = levelIndex;
+        currentQuestionIndex = 0;
+        score = 0;
+        currentPage = 'quiz';
+        renderPage();
+      };
+
+      const handleAnswer = (option) => {
+        const currentQuestions = quizData[selectedCategory][currentLevel].questions;
+        const currentQuestion = currentQuestions[currentQuestionIndex];
+
+        if (option === currentQuestion.answer) {
+          score += 10;
+        }
+
+        if (currentQuestionIndex < currentQuestions.length - 1) {
+          currentQuestionIndex++;
+          renderPage();
+        } else {
+          // End of the selected level
+          saveScoreToFirestore(score);
+          currentPage = 'result';
+          renderPage();
+        }
+      };
+
+      // --- Firebase Functions ---
+      const saveScoreToFirestore = async (finalScore) => {
+        if (!db || !userId) return;
+        try {
+          const userRef = doc(db, `artifacts/${appId}/public/data/leaderboard`, userId);
+          const docSnap = await getDoc(userRef);
+
+          if (docSnap.exists()) {
+            const currentData = docSnap.data();
+            if (finalScore > currentData.score) {
+              await setDoc(userRef, { score: finalScore, timestamp: new Date(), userId: userId });
+            }
+          } else {
+            await setDoc(userRef, { score: finalScore, timestamp: new Date(), userId: userId });
+          }
+        } catch (e) {
+          console.error("Error adding document: ", e);
+        }
+      };
+
+      const setupLeaderboardListener = () => {
+        if (!db || !authReady) return;
+        const leaderboardCollectionRef = collection(db, `artifacts/${appId}/public/data/leaderboard`);
+
+        onSnapshot(leaderboardCollectionRef, async (querySnapshot) => {
+          const leaderboardData = [];
+          querySnapshot.forEach((doc) => {
+            leaderboardData.push({ id: doc.id, ...doc.data() });
+          });
+          leaderboard = leaderboardData;
+          // Re-render if the leaderboard page is currently active
+          if (currentPage === 'leaderboard') {
+            renderPage();
+          }
+        }, (error) => {
+          console.error("Error fetching leaderboard:", error);
+        });
+      };
+    </script>
+</head>
+<body class="bg-gray-950 font-sans antialiased text-gray-100">
+  <div id="app" class="min-h-screen flex flex-col">
+    <!-- Navigation Bar -->
+    <nav class="bg-gray-800 shadow-md p-4 flex justify-between items-center rounded-b-3xl">
+      <div id="brand-logo" class="flex items-center space-x-2 cursor-pointer">
+        <span class="text-2xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-teal-500">
+          Quiz Pro
+        </span>
+      </div>
+      <div class="flex space-x-4">
+        <button id="home-btn" class="p-2 md:px-4 text-emerald-400 font-bold hover:bg-gray-700 rounded-xl transition-colors duration-200">
+          Home
+        </button>
+        <button id="leaderboard-btn" class="p-2 md:px-4 text-emerald-400 font-bold hover:bg-gray-700 rounded-xl transition-colors duration-200">
+          Leaderboard
+        </button>
+        <button id="calculator-btn" class="p-2 md:px-4 bg-emerald-500 text-white font-bold rounded-xl shadow-lg hover:bg-emerald-600 transition-colors duration-200">
+          Calculator
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main Content Container -->
+    <main class="flex-grow flex items-center justify-center p-4">
+      <div id="main-content" class="w-full max-w-4xl bg-gray-900 p-6 md:p-10 rounded-3xl shadow-xl">
+        <!-- Content will be injected here by JavaScript -->
+      </div>
+    </main>
+  </div>
+</body>
+</html>
